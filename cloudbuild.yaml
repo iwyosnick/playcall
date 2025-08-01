@@ -9,7 +9,8 @@ steps:
       - 'deploy'
       - 'playcall' # <-- Replace with your Cloud Run service name
       - '--image=gcr.io/$PROJECT_ID/$REPO_NAME:$COMMIT_SHA'
-      - '--region=us-west1' # <-- Replace with your region
+      - '--region'
+      - 'us-west1' # <-- Replace with your region
       - '--platform=managed'
       - '--allow-unauthenticated'
 options:

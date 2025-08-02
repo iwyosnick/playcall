@@ -7,11 +7,24 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'playcall' # <-- Replace with your Cloud Run service name
+      - '$REPO_NAME'  # Use the repository name as service name
       - '--image=gcr.io/$PROJECT_ID/$REPO_NAME:$COMMIT_SHA'
       - '--region'
-      - 'us-west1' # <-- Replace with your region
+      - 'us-west1'
       - '--platform=managed'
       - '--allow-unauthenticated'
+      - '--port=3000'  # Specify the port your app runs on
+      - '--memory=512Mi'  # Set memory limits
+      - '--cpu=1'  # Set CPU limits
+      - '--max-instances=10'  # Limit max instances
+      - '--timeout=300'  # Set request timeout
+      - '--concurrency=80'  # Set concurrency limit
+
 options:
   logging: CLOUD_LOGGING_ONLY
+  timeout: '1200s'  # Set build timeout to 20 minutes
+
+# Add substitutions for better flexibility
+substitutions:
+  _REGION: 'us-west1'
+  _SERVICE_NAME: '$REPO_NAME'

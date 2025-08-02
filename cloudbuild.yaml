@@ -22,4 +22,3 @@ steps:
 
 options:
   logging: CLOUD_LOGGING_ONLY
-  timeout: '1200s'  # Set build timeout to 20 minutes

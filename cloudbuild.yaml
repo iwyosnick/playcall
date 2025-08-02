@@ -13,7 +13,7 @@ steps:
       - 'us-west1'
       - '--platform=managed'
       - '--allow-unauthenticated'
-      - '--port=80'  # Match the port in your Dockerfile
+      - '--port=8080'  # Match the port in your Dockerfile
       - '--memory=256Mi'  # Reduced memory for static app
       - '--cpu=1'  # Keep CPU at 1
       - '--max-instances=5'  # Reduced max instances

@@ -1,3 +1,31 @@
 {
-  "_comment": "This file is deprecated. The project has been refactored into a client-side only application and no longer uses npm for server dependencies."
+  "name": "playcall",
+  "version": "1.0.0",
+  "description": "This contains everything you need to run your app locally.",
+  "main": "build.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "build": "node build.js",
+    "preview": "vite preview",
+    "dev": "vite"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iwyosnick/playcall.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/iwyosnick/playcall/issues"
+  },
+  "homepage": "https://github.com/iwyosnick/playcall#readme",
+  "devDependencies": {
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "typescript": "^5.9.2",
+    "vite": "^6.3.5"
+  }
 }

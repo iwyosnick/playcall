@@ -1,10 +1,28 @@
-# Use a lightweight nginx image to serve static files
+# Use Node.js for building
+FROM node:18-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Use nginx to serve the built files
 FROM nginx:alpine
 
-# Copy the built application files
-COPY . /usr/share/nginx/html/
+# Copy built files from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html/
 
-# Create a custom nginx configuration that listens on the PORT environment variable
+# Create nginx configuration for Cloud Run
 RUN echo 'server { \
     listen $PORT; \
     server_name _; \
@@ -19,8 +37,5 @@ RUN echo 'server { \
     } \
 }' > /etc/nginx/conf.d/default.conf
 
-# Expose the port (will be overridden by Cloud Run)
 EXPOSE 8080
-
-# Start nginx
 CMD ["nginx", "-g", "daemon off;"]

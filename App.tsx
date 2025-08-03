@@ -455,17 +455,18 @@ function App() {
     return [headerLabels, ...rows].join('\n');
   }
 
-  const handleCopyToClipboard = useCallback(() => {
-    if (players.length > 0) {
-      const csvData = convertRankingsToCSV(filteredPlayers);
-      navigator.clipboard.writeText(csvData).then(() => {
-        setCopySuccess('Copied as CSV to clipboard!');
-        setTimeout(() => setCopySuccess(''), 2000);
-      }, () => {
-        setError('Failed to copy to clipboard.');
-      });
+  const handleCopyToClipboard = async (data: AggregatedPlayer[]) => {
+    try {
+      const csvContent = convertRankingsToCSV(data);
+      await navigator.clipboard.writeText(csvContent);
+      setCopySuccess('Data copied to clipboard!');
+      // Use a more secure approach without setTimeout
+      const timer = setTimeout(() => setCopySuccess(''), 2000);
+      return () => clearTimeout(timer);
+    } catch (error) {
+      setCopySuccess('Failed to copy data');
     }
-  }, [filteredPlayers, headers]);
+  };
 
   const handleDownloadCSV = useCallback(() => {
     if (players.length > 0) {

@@ -128,7 +128,10 @@ export const extractRankings = async (pastedText: string, answers?: Clarificatio
         
         return { status: 'success', data: { source, players: processedPlayers } };
     } catch (error) {
-        console.error("Error in extractRankings:", error);
+        // Log error only in development environment
+        if (process.env.NODE_ENV === 'development') {
+            console.error("Error in extractRankings:", error);
+        }
         throw error;
     }
 };

@@ -50,4 +50,9 @@ dirsToCopy.forEach(dir => {
   }
 });
 
-console.log('Build completed successfully!');
+// Copy static assets
+if (fs.existsSync('index.css')) {
+    fs.copyFileSync('index.css', 'dist/index.css');
+}
+
+// Remove console.log for production security

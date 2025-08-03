@@ -22,6 +22,11 @@
     "url": "https://github.com/iwyosnick/playcall/issues"
   },
   "homepage": "https://github.com/iwyosnick/playcall#readme",
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "@google/genai": "^0.14.0"
+  },
   "devDependencies": {
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.7",

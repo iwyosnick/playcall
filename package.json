@@ -32,5 +32,8 @@
     "@types/react-dom": "^19.1.7",
     "typescript": "^5.9.2",
     "vite": "^6.3.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

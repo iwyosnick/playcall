@@ -1,12 +1,29 @@
-# Use a simple static file server
+# Build stage
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Production stage
 FROM nginx:alpine
 
 # Create a non-root user for security
 RUN addgroup -g 1001 -S nginx && \
     adduser -S -D -H -u 1001 -h /var/cache/nginx -s /sbin/nologin -G nginx -g nginx nginx
 
-# Copy all files to nginx
-COPY . /usr/share/nginx/html/
+# Copy only the built files from the builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Create nginx configuration for Cloud Run with security headers
 RUN echo 'server { \

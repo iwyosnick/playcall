@@ -16,7 +16,7 @@ export interface ExtractionResult {
 }
 
 export interface AggregatedPlayer {
-  name:string;
+  name: string;
   position: string;
   team: string;
   bye?: number;
@@ -60,6 +60,12 @@ export type ClarificationRequest = {
     [key: string]: string; // e.g., { source: "Please specify...", draftType: "..." }
 };
 
+export type ClarificationAnswers = {
+    source?: Source;
+    draftType?: 'Snake' | 'Salary Cap';
+    scoringFormat?: string;
+};
+
 // --- API Result Types ---
 export type RankingsApiResult = 
     | { status: 'success'; data: ExtractionResult }
@@ -68,5 +74,4 @@ export type RankingsApiResult =
 export interface ChatMessage {
   role: 'user' | 'model';
   content: string;
-  suggestions?: string[];
 }

@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 
 interface PositionFilterBarProps {
@@ -11,7 +12,7 @@ const PositionFilterBar: React.FC<PositionFilterBarProps> = ({ availablePosition
   if (availablePositions.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 mb-4">
+    <div className="flex flex-wrap items-center gap-2">
       {availablePositions.map(pos => {
         const isActive = activeFilters.includes(pos);
         return (

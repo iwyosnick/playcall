@@ -16,7 +16,6 @@ export default defineConfig(({ mode }) => {
           input: {
             main: path.resolve(__dirname, 'index.html')
           },
-          external: ['react', 'react-dom', '@google/genai'],
           output: {
             manualChunks: {
               vendor: ['react', 'react-dom'],
@@ -26,7 +25,6 @@ export default defineConfig(({ mode }) => {
         }
       },
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.NODE_ENV': JSON.stringify(mode)
       },
@@ -36,7 +34,7 @@ export default defineConfig(({ mode }) => {
         }
       },
       optimizeDeps: {
-        exclude: ['react', 'react-dom', '@google/genai']
+        include: ['react', 'react-dom', '@google/genai']
       },
       // Add security headers for development
       server: {

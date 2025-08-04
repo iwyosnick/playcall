@@ -1,17 +1,20 @@
 
 
 import React, { useState, useCallback, useMemo } from 'react';
-import { AggregatedPlayer, ExtractedPlayer, ClarificationRequest, SortConfig, HeaderConfig, ChatMessage, PostLoadAction, TradeAnalysis, TextAnalysis, SecondaryAction } from './types';
+import { AggregatedPlayer, ExtractedPlayer, ClarificationRequest, ClarificationAnswers, SortConfig, HeaderConfig, ChatMessage, PostLoadAction, TradeAnalysis, TextAnalysis, SecondaryAction } from './types';
 import { extractRankings, getChatResponse, generateTiers, generateFaabBids, analyzeTrade, getRosterSuggestions, findSleepers, findBusts } from './services/geminiService';
 import PlayerTable from './components/PlayerTable';
+import ClarificationForm from './components/ClarificationForm';
 import { ClipboardIcon } from './components/icons/ClipboardIcon';
 import { TrashIcon } from './components/icons/TrashIcon';
-import PlayCallAIChat from './components/PlayCallAIChat';
+import PlayCallAIChat from './components/ChatCoPilot';
 import InitialPromptUI from './components/InitialPromptUI';
 import AnalysisResultModal from './components/AnalysisResultModal';
 import LoadingSpinner from './components/LoadingSpinner';
 import ContentInputForm from './components/UrlInputForm';
+import ActionPrompts from './components/ActionPrompts';
 import PositionFilterBar from './components/PositionFilterBar';
+import { PlayCallAIIcon } from './components/icons/CoPilotIcon';
 import { DownloadIcon } from './components/icons/DownloadIcon';
 
 const getLastName = (name: string): string => {
@@ -31,15 +34,15 @@ const initialHeaders: HeaderConfig[] = [
 const getPlaceholderText = (action: PostLoadAction | null): string => {
     switch (action) {
         case 'tiers':
-            return "Paste your player rankings or upload a screenshot.\n\nThe AI will extract the players and then help you build a draft-ready cheat sheet.";
+            return "Paste your player rankings here.\n\nThe AI will extract the players and then generate positional tiers to create a draft-ready cheat sheet.";
         case 'faab':
-            return "Paste your waiver wire list, general player data, or upload a screenshot.\n\nThe AI will identify potential free agents and suggest a FAAB bid for each.";
+            return "Paste your waiver wire list or general player data here.\n\nThe AI will identify potential free agents and suggest a FAAB bid for each.";
         case 'trade':
             return "Paste your player data AND the trade details in this box.\n\nExample:\n1. CeeDee Lamb\n2. Breece Hall\n...\nMy Team gets: Ja'Marr Chase\nTheir Team gets: Garrett Wilson, 2025 1st";
         case 'roster':
             return "Paste your full player data AND your current roster here.\n\nThe AI will use the data for player values and then analyze your team to provide strengths, weaknesses, and suggestions.";
         default:
-            return "Paste your rankings, upload a screenshot, or ask a question here to get started...\n\nOr, select one of the actions above for tailored guidance.";
+            return "Paste your rankings, data, or a question here to get started...\n\nOr, select one of the actions above for tailored guidance.";
     }
 };
 
@@ -52,8 +55,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState<string>('');
   
-  const [dataForClarification, setDataForClarification] = useState<{ text: string; imageBase64: string | null; imageMimeType: string | null; } | null>(null);
-  const [isAwaitingClarification, setIsAwaitingClarification] = useState<boolean>(false);
+  const [dataForClarification, setDataForClarification] = useState<string>('');
 
   // --- View & Mode State ---
   const [selectedAction, setSelectedAction] = useState<PostLoadAction | null>(null);
@@ -61,6 +63,7 @@ function App() {
 
   // --- Rankings State ---
   const [players, setPlayers] = useState<AggregatedPlayer[]>([]);
+  const [clarificationRequest, setClarificationRequest] = useState<ClarificationRequest | null>(null);
   const [headers, setHeaders] = useState<HeaderConfig[]>(initialHeaders);
   const [editingHeader, setEditingHeader] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'snakeRank', direction: 'ascending' });
@@ -72,13 +75,15 @@ function App() {
   const [tradeAnalysisResult, setTradeAnalysisResult] = useState<TradeAnalysis | null>(null);
   const [textAnalysisResult, setTextAnalysisResult] = useState<TextAnalysis | null>(null);
 
-  // --- Image State ---
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [imageMimeType, setImageMimeType] = useState<string | null>(null);
-  
   // --- PlayCall AI State ---
+  const [isChatVisible, setChatVisible] = useState(false);
   const [isAiResponding, setIsAiResponding] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+      {
+          role: 'model',
+          content: "Hi! I'm PlayCall AI. Ask me anything about your data or fantasy football in general."
+      }
+  ]);
 
   const playerLookupByLastName = useMemo(() => {
     const map = new Map<string, AggregatedPlayer>();
@@ -90,17 +95,6 @@ function App() {
     });
     return map;
   }, [players]);
-
-  const generateInitialAiGuidance = (playerCount: number, source: string): ChatMessage => {
-    const content = `Great! I've loaded ${playerCount} players from "${source}".\n\nWhat would you like to do next?`;
-    const suggestions = [
-        'Generate Tiers',
-        'Find Sleepers',
-        'Identify Busts',
-        'Add More Data',
-    ];
-    return { role: 'model', content, suggestions };
-  };
   
   const mergeData = (existingPlayers: AggregatedPlayer[], newPlayers: ExtractedPlayer[], source: string): AggregatedPlayer[] => {
     const playerMap = new Map<string, AggregatedPlayer>(existingPlayers.map(p => [p.name.toLowerCase(), p]));
@@ -199,38 +193,28 @@ function App() {
     } else {
         setPlayers(finalPlayers);
     }
-
-    const guidanceMessage = generateInitialAiGuidance(finalPlayers.length, finalSource);
-    setChatMessages([guidanceMessage]);
     
-    setDataForClarification(null);
+    setDataForClarification('');
+    setClarificationRequest(null);
   };
 
-  const handleRankingsSubmit = async (data: string, imageBase64?: string | null, imageMimeType?: string | null, userContext?: string) => {
+  const handleRankingsSubmit = async (data: string) => {
     try {
       setLoadingMessage('Drawing up the Xs and Os...');
-      const result = await extractRankings(data, imageBase64, imageMimeType, userContext);
+      const result = await extractRankings(data);
 
       if (result.status === 'clarification_needed') {
-        setDataForClarification({ text: data, imageBase64, imageMimeType });
-        setIsAwaitingClarification(true);
-        const questionsText = Object.values(result.questions).join('\n- ');
-        const aiMessage: ChatMessage = {
-          role: 'model',
-          content: `To make sure I get this right, I need a little more info:\n\n- ${questionsText}\n\nPlease provide the details in your next message.`
-        };
-        setChatMessages(prev => [...prev, aiMessage]);
+        setDataForClarification(data); // Save data for re-submission
+        setClarificationRequest(result.questions);
       } else if (result.status === 'success') {
         if (result.data.players.length === 0) {
-            throw new Error("The AI could not extract any valid player data. Please check the format of your pasted content or image.");
+            throw new Error("The AI could not extract any valid player data from the text. Please check the format of your pasted content.");
         }
         await processPlayerExtraction(result.data.players, result.data.source, data);
       }
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message);
-        const errorMessage: ChatMessage = { role: 'model', content: `Sorry, I ran into an error: ${err.message}` };
-        setChatMessages(prev => [...prev, errorMessage]);
       } else {
         setError('An unknown error occurred while extracting rankings.');
       }
@@ -240,22 +224,51 @@ function App() {
   const hasData = useMemo(() => players.length > 0, [players]);
 
   const handleDataSubmit = useCallback(async (data: string) => {
-    if (!data.trim() && !imageBase64) {
-      setError('Please provide some data or an image to analyze.');
+    if (!data.trim()) {
+      setError('Please provide some data to analyze.');
       return;
     }
     setIsLoading(true);
     setError(null);
     setCopySuccess('');
-    
-    await handleRankingsSubmit(data, imageBase64, imageMimeType);
+    setClarificationRequest(null);
+
+    await handleRankingsSubmit(data);
 
     setIsLoading(false);
     setLoadingMessage('');
     setIsAddingData(false); // Hide form after submit
-  }, [players, selectedAction, imageBase64, imageMimeType]);
-  
-  const handleSecondaryAction = useCallback(async (action: SecondaryAction) => {
+  }, [players, selectedAction]);
+
+  const handleClarificationSubmit = useCallback(async (answers: ClarificationAnswers) => {
+    setIsLoading(true);
+    setLoadingMessage('Processing...');
+    setError(null);
+    setCopySuccess('');
+    
+    try {
+        const result = await extractRankings(dataForClarification, answers);
+        if (result.status === 'success') {
+            if (result.data.players.length === 0) {
+                throw new Error("The AI still could not extract player data, even with the provided details. The text format might be incompatible.");
+            }
+            await processPlayerExtraction(result.data.players, result.data.source, dataForClarification);
+        } else {
+            throw new Error("Could not resolve questions. Please try again.");
+        }
+    } catch (err: unknown) {
+        if (err instanceof Error) {
+            setError(err.message);
+        } else {
+            setError('An unknown error occurred during clarification.');
+        }
+    } finally {
+        setIsLoading(false);
+        setLoadingMessage('');
+    }
+  }, [dataForClarification, players, selectedAction]);
+
+  const handleSecondaryAction = async (action: SecondaryAction) => {
     setIsLoading(true);
     setError(null);
     setCopySuccess('');
@@ -293,7 +306,7 @@ function App() {
         setIsLoading(false);
         setLoadingMessage('');
     }
-  }, [players]);
+  };
 
   const sortedPlayers = useMemo(() => {
     const sortablePlayers = [...players];
@@ -353,74 +366,26 @@ function App() {
   };
 
   const handleSendMessage = useCallback(async (message: string) => {
-    const userMessage: ChatMessage = { role: 'user', content: message };
-    setChatMessages(prev => [...prev, userMessage]);
+      const newUserMessage: ChatMessage = { role: 'user', content: message };
+      const updatedMessages = [...chatMessages, newUserMessage];
+      setChatMessages(updatedMessages);
+      setIsAiResponding(true);
 
-    // Handle clarification answer
-    if (isAwaitingClarification) {
-        setIsLoading(true);
-        setLoadingMessage('Processing your answer...');
-        setError(null);
-        setIsAwaitingClarification(false);
-
-        if (!dataForClarification) {
-            setError("Something went wrong, I lost the context for your answer. Please try adding the data again.");
-            setIsLoading(false);
-            return;
-        }
-        
-        const { text, imageBase64, imageMimeType } = dataForClarification;
-        await handleRankingsSubmit(text, imageBase64, imageMimeType, message);
-        
-        setIsLoading(false);
-        setLoadingMessage('');
-        setDataForClarification(null); // Clear pending data
-        return;
-    }
-
-    // Command handling
-    if (message === 'Generate Tiers') {
-        await handleSecondaryAction('generate_tiers');
-        const aiMessage = { role: 'model' as const, content: "Done! I've added the AI Tiers column to your table." };
-        setChatMessages(prev => [...prev, aiMessage]);
-        return;
-    }
-    if (message === 'Find Sleepers') {
-        await handleSecondaryAction('find_sleepers');
-        const aiMessage = { role: 'model' as const, content: "I've analyzed the players and opened the results for you. You can close the modal to continue." };
-        setChatMessages(prev => [...prev, aiMessage]);
-        return;
-    }
-    if (message === 'Identify Busts') {
-        await handleSecondaryAction('identify_busts');
-        const aiMessage = { role: 'model' as const, content: "I've analyzed the players and opened the results for you. You can close the modal to continue." };
-        setChatMessages(prev => [...prev, aiMessage]);
-        return;
-    }
-    if (message === 'Add More Data') {
-        setIsAddingData(true);
-        const aiMessage = { role: 'model' as const, content: "Okay, I've opened the data input form in the sidebar. Paste your next data source there when you're ready." };
-        setChatMessages(prev => [...prev, aiMessage]);
-        return;
-    }
-    
-    // Default chat behavior
-    setIsAiResponding(true);
-    try {
-        const aiResponse = await getChatResponse(
-          [...chatMessages, userMessage],
-          players.length > 0 ? filteredPlayers : [],
-          headers
-        );
-        const newAiMessage: ChatMessage = { role: 'model', content: aiResponse };
-        setChatMessages(prev => [...prev, newAiMessage]);
-    } catch (err) {
-        const errorMessage: ChatMessage = { role: 'model', content: "Sorry, I couldn't get a response. Please check your connection or try again." };
-        setChatMessages(prev => [...prev, errorMessage]);
-    } finally {
-        setIsAiResponding(false);
-    }
-  }, [chatMessages, filteredPlayers, headers, handleSecondaryAction, players.length, isAwaitingClarification, dataForClarification]);
+      try {
+          const aiResponse = await getChatResponse(
+            updatedMessages,
+            players.length > 0 ? filteredPlayers : [],
+            headers
+          );
+          const newAiMessage: ChatMessage = { role: 'model', content: aiResponse };
+          setChatMessages(prev => [...prev, newAiMessage]);
+      } catch (err) {
+          const errorMessage: ChatMessage = { role: 'model', content: "Sorry, I couldn't get a response. Please check your connection or try again." };
+          setChatMessages(prev => [...prev, errorMessage]);
+      } finally {
+          setIsAiResponding(false);
+      }
+  }, [chatMessages, filteredPlayers, headers]);
 
   const requestSort = (key: string) => {
     let direction: 'ascending' | 'descending' = 'ascending';
@@ -524,6 +489,7 @@ function App() {
     setIsLoading(false);
     setLoadingMessage('');
     setCopySuccess('');
+    setClarificationRequest(null);
     setHeaders(initialHeaders);
     setSelectedAction(null);
     setAnalysisModalOpen(false);
@@ -531,18 +497,21 @@ function App() {
     setTextAnalysisResult(null);
     setPositionFilters([]);
     setIsAddingData(false);
-    setImageBase64(null);
-    setImageMimeType(null);
-    setDataForClarification(null);
-    setChatMessages([]);
-    setIsAwaitingClarification(false);
   }, []);
 
   const renderContent = () => {
     if (isLoading && !hasData) {
         return <LoadingSpinner message={loadingMessage || 'Loading...'} />;
     }
-    
+    if (clarificationRequest && !isLoading) {
+        return (
+            <ClarificationForm
+                questions={clarificationRequest}
+                onSubmit={handleClarificationSubmit}
+                isLoading={isLoading}
+            />
+        );
+    }
     if (error && !hasData) {
          return (
             <div className="bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg text-center">
@@ -554,80 +523,80 @@ function App() {
 
     if (hasData) {
         return (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="md:col-span-2">
-                     {isLoading && <LoadingSpinner message={loadingMessage || "Loading..."} />}
-                     {error && (
-                        <div className="bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg text-center my-4">
-                            <p className="font-bold">Error</p>
-                            <p>{error}</p>
-                        </div>
-                    )}
-                    {copySuccess && <p className="text-green-400 text-center mb-4">{copySuccess}</p>}
-
-                    <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-4">
-                        <PositionFilterBar 
-                            availablePositions={availablePositions}
-                            activeFilters={positionFilters}
-                            onFilterChange={handlePositionFilterChange}
-                        />
-                        <div className="flex items-center gap-2 self-end md:self-center flex-shrink-0">
-                            <button
-                                onClick={handleDownloadCSV}
-                                className="p-2 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-500 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-                                disabled={!hasData || isLoading}
-                                aria-label="Download as CSV"
-                                title="Download as CSV"
-                            >
-                                <DownloadIcon className="h-5 w-5" />
-                            </button>
-                            <button
-                                onClick={handleCopyToClipboard}
-                                className="p-2 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-500 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-                                disabled={!hasData || isLoading}
-                                aria-label="Copy as CSV"
-                                title="Copy as CSV"
-                            >
-                                <ClipboardIcon className="h-5 w-5" />
-                            </button>
-                            <button
-                                onClick={handleClear}
-                                className="p-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-                                aria-label="Clear All Data"
-                                title="Clear All Data"
-                            >
-                                <TrashIcon className="h-5 w-5" />
-                            </button>
-                        </div>
+            <div>
+                 {isLoading && <LoadingSpinner message={loadingMessage || "Loading..."} />}
+                 {error && (
+                    <div className="bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg text-center my-4">
+                        <p className="font-bold">Error</p>
+                        <p>{error}</p>
                     </div>
-    
-                    <PlayerTable 
-                        players={filteredPlayers} 
-                        headers={headers}
-                        sortConfig={sortConfig}
-                        requestSort={requestSort}
-                        editingHeader={editingHeader}
-                        setEditingHeader={setEditingHeader}
-                        onHeaderLabelChange={handleHeaderLabelChange}
+                )}
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-4 mt-2 gap-4">
+                     <ActionPrompts
+                        onSecondaryAction={handleSecondaryAction}
+                        onAddDataClick={() => setIsAddingData(true)}
+                        disabled={isLoading}
+                        showGeneralActions={hasData}
                     />
-                </div>
-                <div className="md:col-span-1">
-                    <div className="md:sticky md:top-8 md:h-[calc(100vh-6rem)]">
-                        <PlayCallAIChat
-                            messages={chatMessages}
-                            onSendMessage={handleSendMessage}
-                            isResponding={isAiResponding || (isLoading && hasData)}
-                            isAddingData={isAddingData}
-                            onDataSubmit={handleDataSubmit}
-                            inputText={inputText}
-                            setInputText={setInputText}
-                            isLoading={isLoading}
-                            imageBase64={imageBase64}
-                            setImageBase64={setImageBase64}
-                            setImageMimeType={setImageMimeType}
-                        />
+                    <div className="flex items-center space-x-2 self-end sm:self-center">
+                        <button
+                            onClick={handleDownloadCSV}
+                            className="flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-500 text-white font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+                            disabled={!hasData || isLoading}
+                            aria-label="Download as CSV"
+                        >
+                            <DownloadIcon className="h-5 w-5 mr-2" />
+                            Download
+                        </button>
+                        <button
+                            onClick={handleCopyToClipboard}
+                            className="flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-500 text-white font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+                            disabled={!hasData || isLoading}
+                             aria-label="Copy as CSV"
+                        >
+                            <ClipboardIcon className="h-5 w-5 mr-2" />
+                            Copy
+                        </button>
+                        <button
+                            onClick={handleClear}
+                            className="p-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+                            aria-label="Clear All Data"
+                        >
+                            <TrashIcon className="h-5 w-5" />
+                        </button>
                     </div>
                 </div>
+                {copySuccess && <p className="text-green-400 text-center mb-4">{copySuccess}</p>}
+                
+                {isAddingData && (
+                    <div className="my-6">
+                         <h3 className="text-xl font-bold text-white mb-4">Add More Data</h3>
+                         <ContentInputForm
+                            text={inputText}
+                            setText={setInputText}
+                            onSubmit={handleDataSubmit}
+                            isLoading={isLoading}
+                            placeholder="Paste your next data source here..."
+                         />
+                    </div>
+                )}
+                
+                <PositionFilterBar 
+                    availablePositions={availablePositions}
+                    activeFilters={positionFilters}
+                    onFilterChange={handlePositionFilterChange}
+                />
+
+                <PlayerTable 
+                    players={filteredPlayers} 
+                    headers={headers}
+                    sortConfig={sortConfig}
+                    requestSort={requestSort}
+                    editingHeader={editingHeader}
+                    setEditingHeader={setEditingHeader}
+                    onHeaderLabelChange={handleHeaderLabelChange}
+                />
+
             </div>
         );
     }
@@ -645,9 +614,6 @@ function App() {
                 onSubmit={handleDataSubmit}
                 isLoading={isLoading}
                 placeholder={getPlaceholderText(selectedAction)}
-                imageBase64={imageBase64}
-                setImageBase64={setImageBase64}
-                setImageMimeType={setImageMimeType}
             />
         </>
     );
@@ -664,12 +630,29 @@ function App() {
               Personalized AI insights, powered by your data.
             </p>
           </div>
+          {hasData && (
+            <button
+                onClick={() => setChatVisible(true)}
+                className="flex items-center gap-2 px-4 py-2 text-md font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 bg-blue-600 hover:bg-blue-700 text-white"
+                aria-label="Open PlayCall AI Chat"
+            >
+                <PlayCallAIIcon className="h-5 w-5" />
+                <span className="hidden sm:inline">PlayCall AI</span>
+            </button>
+          )}
         </header>
         <main className="bg-gray-800/50 p-6 rounded-2xl shadow-2xl backdrop-blur-sm border border-gray-700">
             {renderContent()}
         </main>
       </div>
-      
+
+      <PlayCallAIChat
+        isVisible={isChatVisible}
+        onClose={() => setChatVisible(false)}
+        messages={chatMessages}
+        onSendMessage={handleSendMessage}
+        isResponding={isAiResponding}
+      />
       <AnalysisResultModal
         isOpen={isAnalysisModalOpen}
         onClose={() => setAnalysisModalOpen(false)}

@@ -3,9 +3,10 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 
 // Validate required environment variables
-if (!process.env.API_KEY) {
-  throw new Error("API_KEY environment variable is required. Please set it in your .env.local file.");
-}
+// Temporarily commented out to test if app loads
+// if (!process.env.GEMINI_API_KEY) {
+//   throw new Error("GEMINI_API_KEY environment variable is required. Please set it in your .env.local file.");
+// }
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

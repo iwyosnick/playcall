@@ -1,6 +1,7 @@
 
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import { ClarificationAnswers, AggregatedPlayer, ChatMessage, HeaderConfig, TradeAnalysis, TextAnalysis, RankingsApiResult, ExtractedPlayer, ClarificationRequest } from "../types";
+import { AggregatedPlayer, ChatMessage, HeaderConfig, TradeAnalysis, TextAnalysis, RankingsApiResult, ExtractedPlayer, ClarificationRequest } from "../types";
 import { getNormalizedPlayer, teamByeWeekMap } from './playerData';
 
 // The user's environment is expected to have this API key.
@@ -19,7 +20,7 @@ const model = "gemini-2.5-flash";
 const extractionSchema = {
     type: Type.OBJECT,
     properties: {
-        source: { type: Type.STRING, description: "A short, descriptive name for the data source (e.g., 'FantasyPros', 'Pasted Rankings'). This must always be provided." },
+        source: { type: Type.STRING, description: "A short, descriptive name for the data source (e.g., 'FantasyPros', 'Screenshot'). This must always be provided." },
         players: {
             type: Type.ARRAY,
             description: "An array of player objects. Should be empty if clarification is needed.",
@@ -34,7 +35,7 @@ const extractionSchema = {
                 required: ['rank', 'name', 'position', 'team']
             }
         },
-        needs_clarification: { type: Type.BOOLEAN, description: "Set to true if you need more information to process the text accurately. Otherwise, set to false." },
+        needs_clarification: { type: Type.BOOLEAN, description: "Set to true if you need more information to process the content accurately. Otherwise, set to false." },
         questions: {
             type: Type.OBJECT,
             description: "If needs_clarification is true, an object of questions for the user. Omit questions that are not needed.",
@@ -48,53 +49,77 @@ const extractionSchema = {
     required: ['source', 'players', 'needs_clarification']
 };
 
-const buildRankingPromptWithSchema = (pastedText: string, answers?: ClarificationAnswers): string => {
+const getExtractionSystemInstruction = (userProvidedContext?: string): string => {
     let contextInstructions = "";
-    if (answers) {
+
+    if (userProvidedContext) {
         contextInstructions = `
-The user has provided the following context, use it to accurately extract the data:
-- Source Name: ${answers.source || 'To be determined by AI'}
-- Draft Type: ${answers.draftType || 'Not specified'}
-- Scoring Format: ${answers.scoringFormat || 'Not specified'}
+The user has provided the following clarification, use it to accurately extract the data:
+"${userProvidedContext}"
 `;
     }
-    return `You are an expert data extraction agent for fantasy football. Analyze the provided text and extract player rankings, conforming to the provided JSON schema.
+
+    return `You are an expert data extraction agent for fantasy football. Analyze the provided content (text and/or image) and extract player rankings, conforming to the provided JSON schema.
+If an image is provided, it is likely a screenshot of rankings or a fantasy football team. Prioritize extracting data from the image if it contains a structured list.
 
 CRITICAL INSTRUCTIONS:
-1.  Extract the **rank**, **name**, **position**, and **team** for each player.
+1.  Extract the **rank**, **name**, **position**, and **team** for each player from either the text or the image.
 2.  Be precise with player names. Include suffixes like 'Jr.', 'Sr.', 'II', etc.
 3.  Even if the user provides additional text like a trade scenario, focus ONLY on extracting the numbered or structured list of player rankings.
 4.  Your entire response MUST be a single JSON object that strictly follows the schema.
 
-${!answers ? `
+${!userProvidedContext ? `
 -   If you have enough information, populate the 'players' array and set 'needs_clarification' to false.
--   If the text is ambiguous (e.g., unclear if it's for a Snake or Salary Cap draft, or if scoring format like PPR matters for the values), you MUST ask for clarification. To do this, leave the 'players' array empty, set 'needs_clarification' to true, and populate the 'questions' object with your questions.
+-   If the content is ambiguous (e.g., unclear if it's for a Snake or Salary Cap draft, or if scoring format like PPR matters for the values), you MUST ask for clarification. To do this, leave the 'players' array empty, set 'needs_clarification' to true, and populate the 'questions' object with your questions.
 ` : `
 - You have been provided with answers to previous questions. Use this context to perform the extraction. Do not ask for clarification again.
 `}
 
 ${contextInstructions}
-
-The user-pasted text is:
----
-${pastedText}
----
 `;
 };
 
-export const extractRankings = async (pastedText: string, answers?: ClarificationAnswers): Promise<RankingsApiResult> => {
+
+export const extractRankings = async (pastedText: string, imageBase64?: string | null, imageMimeType?: string | null, userProvidedContext?: string): Promise<RankingsApiResult> => {
     try {
-        const prompt = buildRankingPromptWithSchema(pastedText, answers);
+        const hasImage = !!(imageBase64 && imageMimeType);
+        const systemInstruction = getExtractionSystemInstruction(userProvidedContext);
+
+        const requestParts: any[] = [];
+
+        if (hasImage) {
+            const base64Data = imageBase64.split(',')[1];
+            if (base64Data) {
+                requestParts.push({
+                    inlineData: {
+                        mimeType: imageMimeType,
+                        data: base64Data,
+                    },
+                });
+            }
+        }
+        
+        if (pastedText && pastedText.trim()) {
+            requestParts.push({ text: pastedText });
+        }
+        
+        if (requestParts.length === 0) {
+            requestParts.push({ text: '(No content provided to analyze)' });
+        }
 
         const response = await ai.models.generateContent({
             model,
-            contents: prompt,
-            config: { responseMimeType: "application/json", responseSchema: extractionSchema }
+            contents: { parts: requestParts },
+            config: { 
+                systemInstruction,
+                responseMimeType: "application/json", 
+                responseSchema: extractionSchema 
+            }
         });
 
         const parsedData = JSON.parse(response.text);
 
-        if (parsedData.needs_clarification && !answers) {
+        if (parsedData.needs_clarification && !userProvidedContext) {
             const questions: ClarificationRequest = {};
             if (parsedData.questions) {
                 for (const [key, value] of Object.entries(parsedData.questions)) {
@@ -110,7 +135,7 @@ export const extractRankings = async (pastedText: string, answers?: Clarificatio
         if (!source || !Array.isArray(rawPlayers)) {
             throw new Error("AI response was malformed or missing data.");
         }
-        if (answers && rawPlayers.length === 0) {
+        if (userProvidedContext && rawPlayers.length === 0) {
             throw new Error("The AI still could not extract player data, even with the provided details.");
         }
 
@@ -128,9 +153,12 @@ export const extractRankings = async (pastedText: string, answers?: Clarificatio
         
         return { status: 'success', data: { source, players: processedPlayers } };
     } catch (error) {
-        // Log error only in development environment
-        if (process.env.NODE_ENV === 'development') {
-            console.error("Error in extractRankings:", error);
+        console.error("Error in extractRankings:", error);
+        if (error instanceof Error) {
+            // Provide a more user-friendly message for JSON parsing errors
+            if (error.message.includes("Unexpected token")) {
+                throw new Error("The AI returned an invalid response. Please try simplifying your input or check if it's formatted correctly.");
+            }
         }
         throw error;
     }

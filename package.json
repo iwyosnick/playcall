@@ -1,0 +1,3 @@
+{
+  "_comment": "This file is deprecated. The project has been refactored into a client-side only application and no longer uses npm for server dependencies."
+}

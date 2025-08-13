@@ -1,6 +1,6 @@
 
 
-import React, { Fragment } from 'react';
+import React from 'react';
 import { TradeAnalysis, TextAnalysis } from '../types';
 
 interface AnalysisResultModalProps {

@@ -7,7 +7,7 @@ export interface ExtractedPlayer {
   name: string;
   position: string;
   team: string;
-  bye?: number;
+  bye: number | undefined;
 }
 
 export interface ExtractionResult {

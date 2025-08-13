@@ -1,7 +1,7 @@
 
 
-import React, { useState, useCallback, useMemo } from 'react';
-import { AggregatedPlayer, ExtractedPlayer, ClarificationRequest, SortConfig, HeaderConfig, ChatMessage, PostLoadAction, TradeAnalysis, TextAnalysis, SecondaryAction } from './types';
+import { useState, useCallback, useMemo } from 'react';
+import { AggregatedPlayer, ExtractedPlayer, SortConfig, HeaderConfig, ChatMessage, PostLoadAction, TradeAnalysis, TextAnalysis, SecondaryAction } from './types';
 import { extractRankings, getChatResponse, generateTiers, generateFaabBids, analyzeTrade, getRosterSuggestions, findSleepers, findBusts } from './services/geminiService';
 import PlayerTable from './components/PlayerTable';
 import { ClipboardIcon } from './components/icons/ClipboardIcon';
@@ -212,7 +212,7 @@ function App() {
       const result = await extractRankings(data, imageBase64, imageMimeType, userContext);
 
       if (result.status === 'clarification_needed') {
-        setDataForClarification({ text: data, imageBase64, imageMimeType });
+        setDataForClarification({ text: data, imageBase64: imageBase64 || null, imageMimeType: imageMimeType || null });
         setIsAwaitingClarification(true);
         const questionsText = Object.values(result.questions).join('\n- ');
         const aiMessage: ChatMessage = {

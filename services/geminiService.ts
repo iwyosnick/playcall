@@ -24,19 +24,22 @@ export const extractRankings = async (pastedText: string, imageBase64?: string |
     try {
         const hasImage = !!(imageBase64 && imageMimeType);
         
-        // Clean the input text if it's from a website or PDF
-        const cleanedText = cleanWebsiteContent(pastedText);
+        // Use progressive content processing for better results
+        const { cleanedText, detectedFormat, processingPhase } = await progressiveContentProcessing(pastedText);
 
         const prompt = `You are an expert data extraction agent for fantasy football. Extract ONLY the player rankings from the provided content.
 
+DETECTED FORMAT: ${detectedFormat}
+PROCESSING PHASE: ${processingPhase}
+
 CRITICAL INSTRUCTIONS:
-1. Focus ONLY on numbered player rankings (e.g., "1. Player Name QB SF")
+1. Focus ONLY on numbered player rankings in the detected format
 2. Ignore all other text, ads, navigation, etc.
 3. Extract rank, name, position, and team for each player
 4. Your response MUST be valid JSON with this exact structure:
 
 {
-  "source": "ESPN PPR Rankings",
+  "source": "Fantasy Football Rankings",
   "players": [
     {
       "rank": 1,
@@ -153,8 +156,114 @@ ${userProvidedContext ? `Additional context: ${userProvidedContext}` : ''}`;
     }
 };
 
-// Helper function to clean messy website/PDF content
-const cleanWebsiteContent = (text: string): string => {
+// Progressive content processing with multi-format detection
+const progressiveContentProcessing = async (text: string): Promise<{ cleanedText: string, detectedFormat: string, processingPhase: string }> => {
+    if (!text) return { cleanedText: '', detectedFormat: 'No text', processingPhase: 'None' };
+    
+    // Phase 1: Quick scan (15K chars, <3s target)
+    console.log('Phase 1: Quick scan (15K characters)...');
+    const quickResult = await processContentChunk(text, 0, 15000);
+    if (quickResult.playerCount >= 250) {
+        return {
+            cleanedText: quickResult.cleanedText,
+            detectedFormat: quickResult.detectedFormat,
+            processingPhase: 'Quick Scan - Found 250+ players'
+        };
+    }
+    
+    // Phase 2: Extended scan (40K chars, <6s target)
+    console.log('Phase 2: Extended scan (40K characters)...');
+    const extendedResult = await processContentChunk(text, 0, 40000);
+    if (extendedResult.playerCount >= 350) {
+        return {
+            cleanedText: extendedResult.cleanedText,
+            detectedFormat: extendedResult.detectedFormat,
+            processingPhase: 'Extended Scan - Found 350+ players'
+        };
+    }
+    
+    // Phase 3: Full processing (<10s total target)
+    console.log('Phase 3: Full processing...');
+    const fullResult = await processContentChunk(text, 0, text.length);
+    return {
+        cleanedText: fullResult.cleanedText,
+        detectedFormat: fullResult.detectedFormat,
+        processingPhase: 'Full Processing - Complete data'
+    };
+};
+
+// Process content chunk with multi-format detection
+const processContentChunk = async (text: string, start: number, end: number): Promise<{ cleanedText: string, detectedFormat: string, playerCount: number }> => {
+    const chunk = text.substring(start, end);
+    
+    // Clean the content
+    let cleaned = cleanBasicContent(chunk);
+    
+    // Detect format and extract players
+    const formatDetection = detectRankingFormat(cleaned);
+    
+    // If we found a good format with many players, use it
+    if (formatDetection.playerCount >= 50) {
+        return {
+            cleanedText: formatDetection.extractedText,
+            detectedFormat: formatDetection.format,
+            playerCount: formatDetection.playerCount
+        };
+    }
+    
+    // Otherwise, return cleaned content for AI processing
+    return {
+        cleanedText: cleaned.length > 50000 ? cleaned.substring(0, 50000) + '...' : cleaned,
+        detectedFormat: 'Mixed/Unknown - Using AI extraction',
+        playerCount: 0
+    };
+};
+
+// Detect ranking format and extract players
+const detectRankingFormat = (text: string): { format: string, playerCount: number, extractedText: string } => {
+    // ESPN/PDF style: "1. Player Name QB SF"
+    const espnPattern = /(\d+\.\s*[A-Za-z\s\.'-]+(?:Jr\.|Sr\.|II|III|IV|V)?\s*[A-Z]{2,3}\s*[A-Z]{2,3})/g;
+    const espnMatches = text.match(espnPattern);
+    
+    // CSV style: "Rank,Player,Pos,Team"
+    const csvPattern = /(\d+),([^,]+),([^,]+),([^,\n]+)/g;
+    const csvMatches = text.match(csvPattern);
+    
+    // Website style: "Player | QB | SF"
+    const websitePattern = /([A-Za-z\s\.'-]+(?:Jr\.|Sr\.|II|III|IV|V)?)\s*\|\s*([A-Z]{2,3})\s*\|\s*([A-Z]{2,3})/g;
+    const websiteMatches = text.match(websitePattern);
+    
+    // Alternative: "QB Player Name SF"
+    const altPattern = /([A-Z]{2,3})\s+([A-Za-z\s\.'-]+(?:Jr\.|Sr\.|II|III|IV|V)?)\s+([A-Z]{2,3})/g;
+    const altMatches = text.match(altPattern);
+    
+    // Find the format with the most matches
+    const results = [
+        { format: 'ESPN/PDF Style', count: espnMatches?.length || 0, matches: espnMatches, pattern: espnPattern },
+        { format: 'CSV Style', count: csvMatches?.length || 0, matches: csvMatches, pattern: csvPattern },
+        { format: 'Website Style', count: websiteMatches?.length || 0, matches: websiteMatches, pattern: websitePattern },
+        { format: 'Alternative Style', count: altMatches?.length || 0, matches: altMatches, pattern: altPattern }
+    ];
+    
+    const bestFormat = results.reduce((best, current) => current.count > best.count ? current : best);
+    
+    if (bestFormat.count >= 50) {
+        return {
+            format: bestFormat.format,
+            playerCount: bestFormat.count,
+            extractedText: bestFormat.matches?.join('\n') || text
+        };
+    }
+    
+    return {
+        format: 'Mixed/Unknown',
+        playerCount: 0,
+        extractedText: text
+    };
+};
+
+// Basic content cleaning
+const cleanBasicContent = (text: string): string => {
     if (!text) return '';
     
     // Remove HTML tags
@@ -167,17 +276,7 @@ const cleanWebsiteContent = (text: string): string => {
     cleaned = cleaned.replace(/Cookie Policy|Privacy Policy|Terms of Service|©.*?\./gi, '');
     cleaned = cleaned.replace(/Loading\.\.\.|Please wait\.\.\./gi, '');
     
-    // Look for ranking patterns and extract just those
-    const rankingPattern = /(\d+\.\s*[A-Za-z\s\.'-]+(?:Jr\.|Sr\.|II|III|IV|V)?\s*[A-Z]{2,3}\s*[A-Z]{2,3})/g;
-    const matches = cleaned.match(rankingPattern);
-    
-    if (matches && matches.length > 10) {
-        // If we found ranking patterns, return just those
-        return matches.join('\n');
-    }
-    
-    // Otherwise return cleaned content but limit length
-    return cleaned.length > 5000 ? cleaned.substring(0, 5000) + '...' : cleaned;
+    return cleaned;
 };
 
 // Helper function to repair malformed JSON

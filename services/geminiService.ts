@@ -221,7 +221,11 @@ const processContentChunk = async (text: string, start: number, end: number): Pr
 
 // Detect ranking format and extract players
 const detectRankingFormat = (text: string): { format: string, playerCount: number, extractedText: string } => {
-    // ESPN/PDF style: "1. Player Name QB SF"
+    // ESPN Complex style: "1. (WR1) Player Name, CIN $57 10 8" - HIGHEST PRIORITY
+    const espnComplexPattern = /(\d+\.\s*\([A-Z]+\d+\)\s*[^,]+,\s*[A-Z]{2,3}\s*\$?\d*\s*\d*\s*\d*)/g;
+    const espnComplexMatches = text.match(espnComplexPattern);
+    
+    // ESPN/PDF style: "1. Player Name QB SF" (fallback)
     const espnPattern = /(\d+\.\s*[A-Za-z\s\.'-]+(?:Jr\.|Sr\.|II|III|IV|V)?\s*[A-Z]{2,3}\s*[A-Z]{2,3})/g;
     const espnMatches = text.match(espnPattern);
     
@@ -237,8 +241,9 @@ const detectRankingFormat = (text: string): { format: string, playerCount: numbe
     const altPattern = /([A-Z]{2,3})\s+([A-Za-z\s\.'-]+(?:Jr\.|Sr\.|II|III|IV|V)?)\s+([A-Z]{2,3})/g;
     const altMatches = text.match(altPattern);
     
-    // Find the format with the most matches
+    // Find the format with the most matches - ESPN Complex gets priority
     const results = [
+        { format: 'ESPN Complex Style', count: espnComplexMatches?.length || 0, matches: espnComplexMatches, pattern: espnComplexPattern },
         { format: 'ESPN/PDF Style', count: espnMatches?.length || 0, matches: espnMatches, pattern: espnPattern },
         { format: 'CSV Style', count: csvMatches?.length || 0, matches: csvMatches, pattern: csvPattern },
         { format: 'Website Style', count: websiteMatches?.length || 0, matches: websiteMatches, pattern: websitePattern },

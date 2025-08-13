@@ -1,7 +1,7 @@
 
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { AggregatedPlayer, ChatMessage, HeaderConfig, TradeAnalysis, TextAnalysis, RankingsApiResult, ExtractedPlayer, ClarificationRequest } from "../types";
+import { AggregatedPlayer, ChatMessage, HeaderConfig, TradeAnalysis, TextAnalysis, RankingsApiResult, ExtractedPlayer, ClarificationRequest, DataTypeDetection, DraftType } from "../types";
 import { getNormalizedPlayer, teamByeWeekMap } from './playerData';
 
 // The user's environment is expected to have this API key.
@@ -144,7 +144,23 @@ ${userProvidedContext ? `Additional context: ${userProvidedContext}` : ''}`;
             }
         }).filter((p): p is ExtractedPlayer => p !== null);
         
-        return { status: 'success', data: { source, players: processedPlayers } };
+        // Detect data type from the processed content
+        const dataType = detectDataType(cleanedText);
+        
+        // If user choice is needed, return the choice modal status
+        if (dataType.needsUserChoice) {
+            return { 
+                status: 'data_type_choice_needed', 
+                dataType, 
+                extractedData: { source, players: processedPlayers }
+            };
+        }
+        
+        return { 
+            status: 'success', 
+            data: { source, players: processedPlayers }, 
+            dataType 
+        };
     } catch (error) {
         console.error("Error in extractRankings:", error);
         if (error instanceof Error) {
@@ -282,6 +298,89 @@ const cleanBasicContent = (text: string): string => {
     cleaned = cleaned.replace(/Loading\.\.\.|Please wait\.\.\./gi, '');
     
     return cleaned;
+};
+
+// Data Type Detection Function
+const detectDataType = (text: string): DataTypeDetection => {
+    // Patterns to detect different data types
+    const snakeRankingPatterns = [
+        /\d+\.\s*[A-Za-z\s\.'-]+(?:Jr\.|Sr\.|II|III|IV|V)?\s*[A-Z]{2,3}\s*[A-Z]{2,3}/g, // "1. Player Name QB SF"
+        /\d+\.\s*\([A-Z]+\d+\)\s*[^,]+,\s*[A-Z]{2,3}\s*\$?\d*\s*\d*\s*\d*/g, // "1. (WR1) Player Name, CIN $57 10 8"
+        /Rank.*Player.*Position.*Team/gi, // CSV headers
+        /^\d+,\s*[^,]+,\s*[A-Z]{2,3},\s*[A-Z]{2,3}/gm // CSV data
+    ];
+    
+    const salaryCapPatterns = [
+        /\$\d+/g, // Dollar amounts
+        /\d+\s*\$/, // Numbers followed by dollar signs
+        /Auction.*Value|Salary.*Cap|Budget.*\$\d+/gi, // Keywords
+        /Value.*\$\d+/gi // Value followed by dollar amounts
+    ];
+    
+    // Count matches for each type
+    let snakeRankingCount = 0;
+    let salaryCapCount = 0;
+    
+    snakeRankingPatterns.forEach(pattern => {
+        const matches = text.match(pattern);
+        if (matches) {
+            snakeRankingCount += matches.length;
+        }
+    });
+    
+    salaryCapPatterns.forEach(pattern => {
+        const matches = text.match(pattern);
+        if (matches) {
+            salaryCapCount += matches.length;
+        }
+    });
+    
+    // Determine the detected type and confidence
+    let detectedType: DraftType = 'unknown';
+    let confidence: 'high' | 'medium' | 'low' = 'low';
+    let reasoning = '';
+    let needsUserChoice = false;
+    
+    if (snakeRankingCount > 0 && salaryCapCount > 0) {
+        detectedType = 'mixed';
+        needsUserChoice = true;
+        if (Math.abs(snakeRankingCount - salaryCapCount) < 10) {
+            confidence = 'medium';
+            reasoning = `Detected both snake draft rankings (${snakeRankingCount} patterns) and salary cap values (${salaryCapCount} patterns). Please choose how to process this data.`;
+        } else {
+            confidence = 'high';
+            reasoning = `Detected both data types: snake draft rankings (${snakeRankingCount} patterns) and salary cap values (${salaryCapCount} patterns). Please choose your preference.`;
+        }
+    } else if (snakeRankingCount > 0) {
+        detectedType = 'snake';
+        if (snakeRankingCount > 50) {
+            confidence = 'high';
+            reasoning = `High confidence snake draft rankings detected (${snakeRankingCount} patterns).`;
+        } else {
+            confidence = 'medium';
+            reasoning = `Snake draft rankings detected (${snakeRankingCount} patterns).`;
+        }
+    } else if (salaryCapCount > 0) {
+        detectedType = 'salary_cap';
+        if (salaryCapCount > 20) {
+            confidence = 'high';
+            reasoning = `High confidence salary cap draft values detected (${salaryCapCount} patterns).`;
+        } else {
+            confidence = 'medium';
+            reasoning = `Salary cap draft values detected (${salaryCapCount} patterns).`;
+        }
+    } else {
+        reasoning = 'Unable to determine data type. Data may be in an unrecognized format.';
+    }
+    
+    return {
+        detectedType,
+        confidence,
+        reasoning,
+        hasSnakeRankings: snakeRankingCount > 0,
+        hasSalaryCapValues: salaryCapCount > 0,
+        needsUserChoice
+    };
 };
 
 // Helper function to repair malformed JSON

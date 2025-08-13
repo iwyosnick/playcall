@@ -12,6 +12,7 @@ import AnalysisResultModal from './components/AnalysisResultModal';
 import LoadingSpinner from './components/LoadingSpinner';
 import ContentInputForm from './components/UrlInputForm';
 import PositionFilterBar from './components/PositionFilterBar';
+import DataTypeModal from './components/DataTypeModal';
 import { DownloadIcon } from './components/icons/DownloadIcon';
 
 const getLastName = (name: string): string => {
@@ -54,6 +55,10 @@ function App() {
   
   const [dataForClarification, setDataForClarification] = useState<{ text: string; imageBase64: string | null; imageMimeType: string | null; } | null>(null);
   const [isAwaitingClarification, setIsAwaitingClarification] = useState<boolean>(false);
+  
+  // Data Type Detection State
+  const [dataTypeChoice, setDataTypeChoice] = useState<{ dataType: any; extractedData: any } | null>(null);
+  const [isDataTypeModalOpen, setIsDataTypeModalOpen] = useState<boolean>(false);
 
   // --- View & Mode State ---
   const [selectedAction, setSelectedAction] = useState<PostLoadAction | null>(null);
@@ -156,7 +161,7 @@ function App() {
     });
   };
 
-  const processPlayerExtraction = async (newPlayers: ExtractedPlayer[], source: string, fullText: string) => {
+  const processPlayerExtraction = async (newPlayers: ExtractedPlayer[], source: string, fullText: string, dataTypeChoice?: string) => {
     setHeaders(prevHeaders => {
         const newSource = source || `Source ${prevHeaders.length}`;
         if (!prevHeaders.some(h => h.key === newSource)) {
@@ -166,6 +171,14 @@ function App() {
     });
     
     const finalSource = source || `Source ${headers.length}`;
+    
+    // Handle data type choice if provided
+    if (dataTypeChoice) {
+      console.log(`Processing data as: ${dataTypeChoice}`);
+      // TODO: Add specific logic for different data types
+      // For now, we'll process as snake draft rankings
+    }
+    
     const merged = mergeData(players, newPlayers, finalSource);
     let finalPlayers = calculateSnakeRanks(merged);
     
@@ -220,6 +233,9 @@ function App() {
           content: `To make sure I get this right, I need a little more info:\n\n- ${questionsText}\n\nPlease provide the details in your next message.`
         };
         setChatMessages(prev => [...prev, aiMessage]);
+      } else if (result.status === 'data_type_choice_needed') {
+        setDataTypeChoice({ dataType: result.dataType, extractedData: result.extractedData });
+        setIsDataTypeModalOpen(true);
       } else if (result.status === 'success') {
         if (result.data.players.length === 0) {
             throw new Error("The AI could not extract any valid player data. Please check the format of your pasted content or image.");
@@ -294,6 +310,37 @@ function App() {
         setLoadingMessage('');
     }
   }, [players]);
+
+  const handleDataTypeChoice = async (choice: string) => {
+    if (!dataTypeChoice) return;
+    
+    try {
+      setIsLoading(true);
+      setLoadingMessage('Processing your choice...');
+      
+      // Process the extracted data based on user choice
+      await processPlayerExtraction(
+        dataTypeChoice.extractedData.players, 
+        dataTypeChoice.extractedData.source, 
+        '', // No additional context needed
+        choice
+      );
+      
+      // Close modal and reset state
+      setIsDataTypeModalOpen(false);
+      setDataTypeChoice(null);
+      
+    } catch (err) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unknown error occurred while processing your choice.');
+      }
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  };
 
   const sortedPlayers = useMemo(() => {
     const sortablePlayers = [...players];
@@ -675,6 +722,13 @@ function App() {
         title={analysisModalTitle}
         tradeResult={tradeAnalysisResult}
         textResult={textAnalysisResult}
+      />
+      
+      <DataTypeModal
+        isOpen={isDataTypeModalOpen}
+        onClose={() => setIsDataTypeModalOpen(false)}
+        dataType={dataTypeChoice?.dataType}
+        onDataTypeChoice={handleDataTypeChoice}
       />
     </div>
   );

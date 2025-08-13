@@ -2,12 +2,27 @@
 
 export type Source = string;
 
+// Data Type Detection Types
+export type DraftType = 'snake' | 'salary_cap' | 'mixed' | 'unknown';
+
+export interface DataTypeDetection {
+  detectedType: DraftType;
+  confidence: 'high' | 'medium' | 'low';
+  reasoning: string;
+  hasSnakeRankings: boolean;
+  hasSalaryCapValues: boolean;
+  needsUserChoice: boolean;
+}
+
 export interface ExtractedPlayer {
   rank: number;
   name: string;
   position: string;
   team: string;
   bye: number | undefined;
+  // Add support for salary cap values
+  salaryCapValue?: number;
+  auctionValue?: number;
 }
 
 export interface ExtractionResult {
@@ -62,8 +77,9 @@ export type ClarificationRequest = {
 
 // --- API Result Types ---
 export type RankingsApiResult = 
-    | { status: 'success'; data: ExtractionResult }
-    | { status: 'clarification_needed'; questions: ClarificationRequest };
+    | { status: 'success'; data: ExtractionResult; dataType?: DataTypeDetection }
+    | { status: 'clarification_needed'; questions: ClarificationRequest; dataType?: DataTypeDetection }
+    | { status: 'data_type_choice_needed'; dataType: DataTypeDetection; extractedData: any };
 
 export interface ChatMessage {
   role: 'user' | 'model';
